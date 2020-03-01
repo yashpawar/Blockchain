@@ -49,7 +49,7 @@ class Blockchain:
         a valid hash.
         """
         # no proof of work is done for creation of genesis block
-        genesis_block = Block(0, [], 0, "0")
+        genesis_block = Block(0, [], 0, 0)
         genesis_block.hash = genesis_block.compute_hash()
         self.chain.append(genesis_block)
 
@@ -70,6 +70,10 @@ class Blockchain:
         # get hash of last block
         previous_hash = self.last_block.hash
 
+        # check if hash of previous block matches with previous_hash field entered in new block
+        if (self.last_block.index + 1) != block.index:
+            return False
+        
         # check if hash of previous block matches with previous_hash field entered in new block
         if previous_hash != block.previous_hash:
             return False
@@ -200,17 +204,17 @@ def get_pending_tx():
 # a command to mine from our application itself.
 @app.route('/mine', methods=['GET'])
 def mine_unconfirmed_transactions():
-    result = blockchain.mine()
-    if not result:
+    if not blockchain.unconfirmed_transactions:
         return "No transactions to mine"
     else:
         # Making sure we have the longest chain before announcing to the network
-        chain_length = len(blockchain.chain)
+        #chain_length = len(blockchain.chain)
         # perform consensus
         consensus()
-        if chain_length == len(blockchain.chain):
+        result = blockchain.mine()
+        #if chain_length == len(blockchain.chain):
             # announce the recently mined block to the network
-            announce_new_block(blockchain.last_block)
+        announce_new_block(blockchain.last_block)
         return "Block #{} is mined.".format(blockchain.last_block.index)
 
 def announce_new_block(block):
@@ -222,9 +226,7 @@ def announce_new_block(block):
     for peer in peers:
         url = "{}add_block".format(peer)
         headers = {'Content-Type': "application/json"}
-        requests.post(url,
-                      data=json.dumps(block.__dict__, sort_keys=True),
-                      headers=headers)
+        requests.post(url,data=json.dumps(block.__dict__, sort_keys=True),headers=headers)
 
 # endpoint to add a block mined by someone else to
 # the node's chain. The block is first verified by the node
@@ -251,103 +253,30 @@ def consensus():
     """
     Our naive consnsus algorithm. If a longer valid chain is
     found, our chain is replaced with it.
-    """
+    """    
     longest_chain = None
     current_len = len(blockchain.chain)
-    
+    global peers
+    peer=set()
     for node in peers:
         response = requests.get('{}chain'.format(node))
-        length = response.json()['length']
-        chain = response.json()['chain']
+        length = response.json()["length"]
+        chain = response.json()["chain"]
+        # implement consensus of peers
+        peer.update(response.json()["peers"])
+        peer.discard(request.host_url)
+        
         if length > current_len:
-            chain=create_chain_from_dump(chain).chain
-            if check_chain_validity(chain):
-                current_len = length
-                longest_chain = chain
-
+            longest_chain=create_chain_from_dump(chain).chain
+            current_len = length
+            
+    peers=peers.union(peer)
+    
     if longest_chain is not None:
         blockchain.chain = longest_chain
         return True
+    
     return False
-
-def check_chain_validity(chain):
-    """
-    Determine if a given blockchain is valid
-    :param chain: A blockchain
-    :return: True if valid, False if not
-    """
-    # start from genesis block
-    last_block = chain[0]
-    current_index = 1
-    # loop over length of blockchain
-    while current_index < len(chain):
-        # get a block from chain
-        block = chain[current_index]
-        # calculate hash of previous block
-        # Check that the hash of the block is correct
-        if block.previous_hash != last_block.compute_hash():
-            return False
-        # Check that the Proof of Work is correct
-        if not Block.is_valid_proof(block,block.hash):
-            return False
-
-        last_block = block
-        current_index += 1
-
-    return True
-
-# endpoint to add new peers to the network.
-@app.route('/register_node', methods=['POST'])
-def register_new_peers():
-    response = request.get_json()
-    node_address=response["node_address"]
-    if not node_address:
-        return "Invalid data", 400
-
-    # Add the node to the peer list
-    # update chain and the peers
-        
-    peers.update(response['peers'])
-    peers.update([node_address])
-    peers.discard(request.host_url)
-    consensus()
-    # Return the consensus blockchain to the newly registered node
-    # so that he can sync
-    return get_chain()
-
-
-@app.route('/register_with', methods=['POST'])
-def register_with_existing_node():
-    """
-    Internally calls the `register_node` endpoint to
-    register current node with the node specified in the
-    request, and sync the blockchain as well as peer data.
-    """
-    node_address = request.get_json()["node_address"]
-    if not node_address:
-        return "Invalid data", 400
-
-    data = {"node_address": request.host_url,"peers":list(peers)}
-    headers = {'Content-Type': "application/json"}
-
-    # Make a request to register with remote node and obtain information
-    response = requests.post(node_address + "/register_node",
-                             data=json.dumps(data), headers=headers)
-
-    if response.status_code == 200:
-        # update chain and the peers
-        
-        peers.update(response.json()['peers'])
-        peers.update([node_address+"/"])
-        peers.discard(request.host_url)
-        chain_dump = response.json()['chain']
-        blockchain = create_chain_from_dump(chain_dump)
-        
-        return "{} connected to {}".format(request.host_url,node_address+"/"), 200
-    else:
-        # if something goes wrong, pass it on to the API response
-        return response.content, response.status_code
-
 
 def create_chain_from_dump(chain_dump):
     generated_blockchain = Blockchain()
@@ -365,6 +294,60 @@ def create_chain_from_dump(chain_dump):
         if not added:
             raise Exception("The chain dump is tampered!!")
     return generated_blockchain
+
+
+# endpoint to add new peers to the network.
+@app.route('/register_node', methods=['POST'])
+def register_new_peers():
+    response = request.get_json()
+    node_address=response["node_address"]
+    if not node_address:
+        return "Invalid data", 400
+
+    # Add the node to the peer list
+    # update chain and the peers
+        
+    # peers.update(response["peers"])
+    peers.update([node_address])
+    # peers.discard(request.host_url)
+    consensus()
+    # Return the consensus blockchain to the newly registered node
+    # so that he can sync
+    # return json.dumps({"peers": list(peers)})
+    return "Success", 200
+
+
+@app.route('/register_with', methods=['POST'])
+def register_with_existing_node():
+    """
+    Internally calls the `register_node` endpoint to
+    register current node with the node specified in the
+    request, and sync the blockchain as well as peer data.
+    """
+    node_address = request.get_json()["node_address"]
+    if not node_address:
+        return "Invalid data", 400
+    # request.host_url is sender's url
+    data = {"node_address": request.host_url}
+    headers = {'Content-Type': "application/json"}
+
+    # Make a request to register with remote node and obtain information
+    response = requests.post(node_address + "/register_node",
+                             data=json.dumps(data), headers=headers)
+
+    if response.status_code == 200:
+        
+        # update chain and the peers
+        
+        #peers.update(response.json()['peers'])
+        peers.update([node_address+"/"])
+        #peers.discard(request.host_url)
+        consensus()
+        
+        return "{} connected to {}".format(request.host_url,node_address+"/"), 200
+    else:
+        # if something goes wrong, pass it on to the API response
+        return response.content, response.status_code
 
 
 
