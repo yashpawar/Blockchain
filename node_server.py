@@ -86,6 +86,12 @@ class Blockchain:
         block.hash = proof
         # append new block to the blockchain
         self.chain.append(block)
+        
+        # Now that we have accepted the block, we will remove the transactions
+        # confirmed from list of unconfirmed transactions
+        y=[x for x in self.unconfirmed_transactions if x not in block.transactions]
+        self.unconfirmed_transactions=y
+        
         return True
         
 
@@ -138,7 +144,7 @@ class Blockchain:
         # add this block tothe chain
         self.add_block(new_block, proof)
         # empty the list of unconfirmed transactions
-        self.unconfirmed_transactions = []
+        # self.unconfirmed_transactions = []
 
         return True
 
@@ -192,7 +198,7 @@ def new_transaction():
 
     return "Success", 201
 
-# endpoint to query unconfirmed transactions
+# endpoint to accept unconfirmed transactions from other nodes
 @app.route('/pending_tx',methods=['POST'])
 def get_pending_tx():
     tx_data=request.get_json()
@@ -283,7 +289,7 @@ def create_chain_from_dump(chain_dump):
     generated_blockchain.create_genesis_block()
     for idx, block_data in enumerate(chain_dump):
         if idx == 0:
-            continue  # skip genesis block
+            continue  # skip genesis block as no proof of work was done for it
         block = Block(block_data["index"],
                       block_data["transactions"],
                       block_data["timestamp"],
