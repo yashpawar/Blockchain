@@ -199,20 +199,34 @@ if node_type==1:
 app = Flask(__name__)
 
 ###suppress output
+"""
 import os
 import logging
 
 logging.getLogger('werkzeug').disabled = True
 os.environ['WERKZEUG_RUN_MAIN'] = 'true'
-
+"""
 ###############################################################################
 
 
 # endpoint to return the node's copy of the chain.
 # Our application will be using this endpoint to query
 # all the posts to display.
+
+"""
+def send_chain():
+    # added new functionality to check wether incoming request is from valid peer
+    try:
+        sender="http://"+request.remote_addr+":"+port+"/"
+        if not sender in peers:
+            return "Rejected",400
+    except:
+        pass
+    return get_chain()
+"""
 @app.route('/chain', methods=['GET'])
 def get_chain():
+    
     chain_data = []
     for block in blockchain.chain:
         chain_data.append(block.__dict__)
@@ -243,12 +257,23 @@ def announce_new_transaction(tx_data):
     """
     A function to announce to the network new transaction.
     """
+    lost_peers=[]
     for peer in miners:
         if peer == CONNECTED_NODE_ADDRESS:
             continue
         url = "{}pending_tx".format(peer)
         headers = {'Content-Type': "application/json"}
-        requests.post(url,data=json.dumps(tx_data, sort_keys=True),headers=headers)
+        #requests.post(url,data=json.dumps(tx_data, sort_keys=True),headers=headers)
+        try:
+            response=requests.post(url,data=json.dumps(tx_data, sort_keys=True),headers=headers)
+            response.raise_for_status()
+        except requests.exceptions.RequestException as e:
+            lost_peers.append(peer)
+    [peers.pop(peer) for peer in lost_peers]
+    [miners.pop(peer) for peer in lost_peers]
+    if lost_peers:
+        announce_lost_peers(lost_peers)
+    lost_peers=[]
 
 # endpoint to accept unconfirmed transactions from other nodes
 @app.route('/pending_tx',methods=['POST'])
@@ -293,12 +318,23 @@ def announce_new_block(block):
     Other blocks can simply verify the proof of work and add it to their
     respective chains.
     """
+    lost_peers=[]
     for peer in peers:
         if peer == CONNECTED_NODE_ADDRESS:
             continue
         url = "{}add_block".format(peer)
         headers = {'Content-Type': "application/json"}
-        requests.post(url,data=json.dumps(block.__dict__, sort_keys=True),headers=headers)
+        #requests.post(url,data=json.dumps(block.__dict__, sort_keys=True),headers=headers)
+        try:
+            response=requests.post(url,data=json.dumps(block.__dict__, sort_keys=True),headers=headers)
+            response.raise_for_status()
+        except requests.exceptions.RequestException as e:
+            lost_peers.append(peer)
+    [peers.pop(peer) for peer in lost_peers]
+    [miners.pop(peer) for peer in lost_peers]
+    if lost_peers:
+        announce_lost_peers(lost_peers)
+    lost_peers=[]
 
 # endpoint to add a block mined by someone else to
 # the node's chain. The block is first verified by the node
@@ -331,8 +367,15 @@ def consensus():
     longest_chain = None
     current_len = len(blockchain.chain)
     #peer=set()
-    for node in peers:
-        response = requests.get('{}chain'.format(node))
+    lost_peers=[]
+    for peer in peers:
+        try:
+            response = requests.get('{}chain'.format(peer))
+            response.raise_for_status()
+        except requests.exceptions.RequestException as e:
+            lost_peers.append(peer)
+            continue
+    
         length = response.json()["length"]
         chain = response.json()["chain"]
         # implement consensus of peers
@@ -346,6 +389,11 @@ def consensus():
             current_len = length
             
     #peers=peers.union(peer)
+    [peers.pop(peer) for peer in lost_peers]
+    [miners.pop(peer) for peer in lost_peers]
+    if lost_peers:
+        announce_lost_peers(lost_peers)
+    lost_peers=[]
     
     if longest_chain is not None:
         blockchain.chain = longest_chain
@@ -423,10 +471,14 @@ def register_with_existing_node(node_address):
     headers = {'Content-Type': "application/json"}
 
     # Make a request to register with remote node and obtain information
-    response = requests.post(node_address + "register_node",
-                             data=json.dumps(data), headers=headers)
-    
-
+    #response = requests.post(node_address + "register_node",data=json.dumps(data), headers=headers)
+    #########error handling trials
+    try:
+        response = requests.post(node_address + "register_node",data=json.dumps(data), headers=headers)
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        return "failed"
+    ######### 
     if response.status_code == 200:
         
         # update chain and the peers
@@ -448,14 +500,26 @@ def register_with_existing_node(node_address):
 
 def announce_new_peer(new_peer):
     """
-    A function to announce to the network new transaction.
+    A function to announce to the network new peer.
     """
+    lost_peers=[]
     for peer in peers:
-        if (peer == CONNECTED_NODE_ADDRESS) or (peer == new_peer.keys()):
+        if (peer == CONNECTED_NODE_ADDRESS) or (peer == list(new_peer.keys())[0]):
             continue
         url = "{}add_peer".format(peer)
         headers = {'Content-Type': "application/json"}
-        requests.post(url,data=json.dumps(new_peer, sort_keys=True),headers=headers)
+        #requests.post(url,data=json.dumps(new_peer, sort_keys=True),headers=headers)
+        try:
+            response=requests.post(url,data=json.dumps(new_peer, sort_keys=True),headers=headers)
+            response.raise_for_status()
+        except requests.exceptions.RequestException as e:
+            lost_peers.append(peer)
+    [peers.pop(peer) for peer in lost_peers]
+    [miners.pop(peer) for peer in lost_peers]
+    if lost_peers:
+        announce_lost_peers(lost_peers)
+    lost_peers=[]
+
 
 # endpoint to accept unconfirmed transactions from other nodes
 @app.route('/add_peer',methods=['POST'])
@@ -469,6 +533,50 @@ def add_peer():
         miners.update(response)
     peers.update(response)
     return "Success",202
+
+#######peer deletion###########################
+def announce_lost_peers(new_peer):
+    """
+    A function to announce to the network deletion of a peer.
+    """
+    lost_peers=[]
+    for peer in peers:
+        if (peer == CONNECTED_NODE_ADDRESS) or (peer == new_peer.keys()):
+            continue
+        url = "{}lost_peer".format(peer)
+        headers = {'Content-Type': "application/json"}
+        #requests.post(url,data=json.dumps(new_peer, sort_keys=True),headers=headers)
+        try:
+            requests.post(url,data=json.dumps(new_peer, sort_keys=True),headers=headers)
+            response.raise_for_status()
+        except requests.exceptions.RequestException as e:
+            lost_peers.append(peer)
+    [peers.pop(peer) for peer in lost_peers]
+    [miners.pop(peer) for peer in lost_peers]
+    if lost_peers:
+        announce_lost_peers(lost_peers)
+    lost_peers=[]
+        
+
+# endpoint to accept unconfirmed transactions from other nodes
+@app.route('/lost_peer',methods=['POST'])
+def lost_peer():
+    sender="http://"+request.remote_addr+":"+port+"/"
+    # added new functionality to check wether incoming peer data block is from valid miner
+    if not sender in miners:
+        return "Rejected",400
+    response=request.get_json()
+    """
+    if list(response.values())[0]==1:
+        miners.pop(response)
+    peers.pop(response)
+    """
+    for peer in response:
+        if response.get(peer)==1:
+            miners.pop(peer)
+        peers.pop(peer)
+    return "Success",202
+################################################
 
 # Uncomment this line if you want to specify the port number in the code
 # take port as command line arguement
@@ -515,4 +623,55 @@ def option_menu():
         
 option_menu()
 
+######################chat mode#########################
+from tkinter import *
+def get_chat():
+    while 1:
+        text=""
+        ch=blockchain.chain.copy()
+        for bl in ch:
+            txs=bl.transactions
+            for tx in txs:
+                text+=str(str(tx.get('peer'))+" : "+str(tx.get('data'))+"\n")
+        T.config(state='normal')
+        T.delete(1.0, END)
+        T.insert(END,text)
+        T.config(state='disabled')        
+        time.sleep(0.25)
+ 
+master =Tk()
+master.title('Chat') 
+
+S = Scrollbar(master)
+S.pack(side=RIGHT,fill=Y)
+
+T=Text(master, height=10, width=50)
+T.pack()
+S.config(command=T.yview)
+T.config(yscrollcommand=S.set)
+
+tc=Thread(target = get_chat)
+tc.daemon=True
+tc.start()
+T2=Text(master, height=2, width=50)
+T2.pack()
+def send():
+    new_transaction({'peer':CONNECTED_NODE_ADDRESS,'data':T2.get("1.0",'end-1c')})
+    T2.delete(1.0,END)
+send = Button(master, text='Send', width=25, command=send) 
+send.pack()
+Tr=Text(master, height=1, width=50)
+Tr.pack()
+def reg():
+    register_with_existing_node("http://"+Tr.get("1.0",'end-1c')+":"+port+"/")
+reg = Button(master, text='Register', width=25, command=reg)
+
+reg.pack()
+def stop():
+    master.destroy
+    sys.exit()
+stop = Button(master, text='Stop', width=25, command=stop) 
+stop.pack()
+master.mainloop() 
+#############################################################
 
