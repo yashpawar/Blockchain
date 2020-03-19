@@ -1,0 +1,67 @@
+<!-- extend base layout -->
+{% extends "base.html" %}
+
+{% block content %}
+	<br>
+
+	<center>
+	<form action="{{node_address}}reg" id="registration" method="post">
+	    <input type="text" name="peer" placeholder="Remote node">
+	    <input type="submit" value="Register">
+	</form>
+	</center>
+	<center>
+	<form action="{{node_address}}submit" id="textform" method="post">
+	    <textarea name="data" rows="3" cols="60" placeholder="Message"></textarea>
+	    <br>
+	    <input type="submit" value="Post">
+	</form>
+	</center>
+
+	<br>
+	<a href="/"><button>Resync</button></a>
+
+	<div style="margin: 20px;">
+
+    {% for post in posts %}
+    <div class="post_box">
+	   <div class="post_box-header">
+	      <div class="name-header">{{post['peer']}}</div>
+	      <div class="post_box-subtitle"> Posted at <i>{{readable_time(post['timestamp'])}}</i></div>
+	   </div>
+	   <div>
+	      <div class="post_box-body">
+	         <p>{{post.data}}</p>
+	      </div>
+	   </div>
+	</div>
+	{% endfor %}
+
+	<style>
+		.post_box {
+		    background: #fff;
+		    padding: 12px 0px 0px 12px;
+		    margin-top: 0px;
+		    margin-bottom: 8px;
+		    border-top: 1px solid #f0f0f0;
+		}
+
+		.post_box-header {
+		    padding-bottom: 12px;
+		}
+		.post_box-name {
+		    font-weight: bold;
+		}
+
+		.post_box-subtitle {
+		    color: #777;
+		}
+
+		.post_box-body {
+		    margin-top: 16px;
+		    margin-bottom: 8px;
+		}
+
+	</style>
+    </div>
+{% endblock %}

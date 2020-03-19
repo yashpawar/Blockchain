@@ -577,19 +577,71 @@ def lost_peer():
             miners.pop(peer)
         peers.pop(peer)
     return "Success",202
-################################################
-
-# Uncomment this line if you want to specify the port number in the code
-# take port as command line arguement
-# to be edited later
 
 
+
+###################endpoints for web-based#############################
+from datetime import datetime
+def view():
+    post=[]
+    c=get_chain().get('chain')
+    for b in c:
+        for tx in b.get('transactions'):
+            post.append(tx)
+    return (post)
+
+def timestamp_to_string(epoch_time):
+    return datetime.utcfromtimestamp(epoch_time).strftime('%Y-%m-%d %H:%M:%S')
+
+from flask import render_template, redirect
+
+@app.route('/')
+def index():
+    sender="http://"+request.remote_addr+":"+port+"/"
+    if not sender == CONNECTED_NODE_ADDRESS:
+        return "Rejected",400
+    return render_template('index.html',
+                           title='Chat',
+                           posts=view(),
+                           node_address=CONNECTED_NODE_ADDRESS,
+                           readable_time=timestamp_to_string)
+
+@app.route('/submit', methods=['POST'])
+def submit_textarea():
+    """
+    Endpoint to create a new transaction via our application.
+    """
+    sender="http://"+request.remote_addr+":"+port+"/"
+    if not (sender == CONNECTED_NODE_ADDRESS):
+        return "Rejected",400
+    print(new_transaction({'peer':CONNECTED_NODE_ADDRESS,'data':request.form['data']}))
+    return redirect('/')
+
+@app.route('/reg', methods=['POST'])
+def reg():
+    """
+    Endpoint to create a new transaction via our application.
+    """
+    sender="http://"+request.remote_addr+":"+port+"/"
+    if not (sender == CONNECTED_NODE_ADDRESS):
+        return "Rejected",400
+    Remote_node="http://"+request.form['peer']+":"+port+"/"
+    print(register_with_existing_node(Remote_node))
+    return redirect('/')
+
+print(CONNECTED_NODE_ADDRESS)
+
+#######################################################################
+
+"""
 def run_app():
     app.run(host=host,port=port,threaded=True)
     
-t1=Thread(target = run_app)
-t1.daemon=True
-t1.start()
+    
+ta=Thread(target = run_app)
+ta.daemon=True
+ta.start()
+"""
 
  
 time.sleep(1)
@@ -598,10 +650,13 @@ def mining():
     while 1:
         mine_unconfirmed_transactions()
 if node_type:
-    t2=Thread(target = mining)
-    t2.daemon=True
-    t2.start()
+    tm=Thread(target = mining)
+    tm.daemon=True
+    tm.start()
 
+    
+app.run(host=host,port=port,threaded=True)
+"""
 from datetime import datetime    
 def view():
     text=""
@@ -609,7 +664,7 @@ def view():
     for b in c:
         for tx in b.get('transactions'):
             text+=tx.get('peer')+" : "+tx.get('data')+"\n"+str(datetime.utcfromtimestamp(tx.get('timestamp')).strftime('%Y-%m-%d %H:%M:%S'))+"\n\n"
-    print(text)             
+    return (text)             
 def option_menu():
     while 1:
         print("___________________________________________________________________________________")
@@ -629,7 +684,57 @@ def option_menu():
             sys.exit()
         print("___________________________________________________________________________________")
         
-option_menu()
+#option_menu()
+
+from tkinter import *
+def get_chat():
+    while 1:
+        T.config(state='normal')
+        T.delete(1.0, END)
+        T.insert(END,view())
+        T.config(state='disabled')        
+        time.sleep(0.25)
+ 
+master =Tk()
+master.title('Chat') 
+
+S = Scrollbar(master)
+S.pack(side=RIGHT,fill=Y)
+
+T=Text(master, height=10, width=50)
+T.pack()
+S.config(command=T.yview)
+T.config(yscrollcommand=S.set)
+
+tc=Thread(target = get_chat)
+tc.daemon=True
+tc.start()
+T2=Text(master, height=2, width=50)
+T2.pack()
+def send():
+    new_transaction({'peer':CONNECTED_NODE_ADDRESS,'data':T2.get("1.0",'end-1c')})
+    T2.delete(1.0,END)
+send = Button(master, text='Send', width=25, command=send) 
+send.pack()
+Tr=Text(master, height=1, width=50)
+Tr.pack()
+def reg():
+    register_with_existing_node("http://"+Tr.get("1.0",'end-1c')+":"+port+"/")
+reg = Button(master, text='Register', width=25, command=reg)
+
+reg.pack()
+def stop():
+    master.destroy
+    sys.exit()
+stop = Button(master, text='Stop', width=25, command=stop) 
+stop.pack()
+master.mainloop() 
+"""
 
 
+    
+    
+    
+    
+                           
 
