@@ -11,6 +11,23 @@ import requests
 import socket
 from threading import Thread
 
+def savegenesis(block):
+    with open('Blockchain.pickle', 'wb') as output:
+        pickle.dump(block, output, pickle.HIGHEST_PROTOCOL)
+
+def saveblock(block):
+    with open('Blockchain.pickle', 'ab') as output:
+        pickle.dump(block, output, pickle.HIGHEST_PROTOCOL)
+    view(block)
+
+def savechain(chain):
+    savegenesis(chain[0])
+    if len(chain)==1:
+        return
+    for block in chain[1:]:
+        saveblock(block)
+
+
 # Block class
 class Block:
     # constructor
@@ -58,6 +75,10 @@ class Blockchain:
         genesis_block = Block(0, [], 0, 0)
         genesis_block.hash = genesis_block.compute_hash()
         self.chain.append(genesis_block)
+        
+        if self == blockchain:
+            savegenesis(genesis_block)
+        
 
     # get last block of blockchain
     @property
@@ -98,11 +119,30 @@ class Blockchain:
         y=[x for x in self.unconfirmed_transactions if x not in block.transactions]
         self.unconfirmed_transactions=y
         
+        """
+        chain_data = []
+        for block in self.chain:
+            chain_data.append(block.__dict__)
+        with open("./blockchain", "w") as file_:
+            file_.write(str(base64.b64encode(b''+str.encode(str(chain_data))) ))
+        """
+
+        if self == blockchain:
+            saveblock(block)
+            
+        
         return True
 
     # add new transaction to blockchain
     def add_new_transaction(self, transaction):
-        self.unconfirmed_transactions.append(transaction)    
+        self.unconfirmed_transactions.append(transaction)
+        
+        if list(miners.keys())[int(self.last_block.hash,16) % (len(miners))] == CONNECTED_NODE_ADDRESS:
+            #return "Not Me",400
+            if len(self.unconfirmed_transactions)>=Block_size:
+                t2=Thread(target = mine_unconfirmed_transactions)
+                t2.daemon=True
+                t2.start()    
     
     # perform proof of work
     @staticmethod
@@ -147,48 +187,9 @@ class Blockchain:
         self.add_block(new_block, proof)
         # empty the list of unconfirmed transactions
         # self.unconfirmed_transactions = []
-        
-        """
-        chain_data = []
-        for block in self.chain:
-            chain_data.append(block.__dict__)
-        with open("./blockchain", "w") as file_:
-            file_.write(str(base64.b64encode(b''+str.encode(str(chain_data))) ))
-        """
-
         return True
 
 ##########################################################################################################
-host='0.0.0.0'
-port='8000'
-node_type=int(sys.argv[1])
-Block_size=1
-
-# the node's copy of blockchain
-blockchain = Blockchain()
-
-# genesis block of blockchain is created
-blockchain.create_genesis_block()
-
-# address of this node
-def get_ip():
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        # doesn't even have to be reachable
-        s.connect(('192.168.43.100', 80))
-        IP = s.getsockname()[0]
-    except:
-        IP = '127.0.0.1'
-    finally:
-        s.close()
-    return IP
-CONNECTED_NODE_ADDRESS="http://"+get_ip()+":"+port+"/"
-# the address to other participating members of the network
-#peers = set()
-peers={CONNECTED_NODE_ADDRESS:node_type}
-miners={}
-if node_type==1:
-    miners={CONNECTED_NODE_ADDRESS:1}
 
    
 
@@ -277,6 +278,16 @@ def get_pending_tx():
         return "Rejected",400
     tx_data=request.get_json()
     blockchain.add_new_transaction(tx_data)
+    
+    if list(miners.keys())[int(blockchain.last_block.hash,16) % (len(miners))] == CONNECTED_NODE_ADDRESS:
+        #return "Not Me",400
+        if len(blockchain.unconfirmed_transactions)>Block_size:
+            t2=Thread(target = mine_unconfirmed_transactions)
+            t2.daemon=True
+            t2.start()
+    
+    
+    
     return "Success",202
 
 # endpoint to request the node to mine the unconfirmed
@@ -284,21 +295,26 @@ def get_pending_tx():
 # a command to mine from our application itself.
 #@app.route('/mine', methods=['GET'])
 def mine_unconfirmed_transactions():
+    """
     if node_type==0:
         return "I cannot mine"
-    
-    while len(blockchain.unconfirmed_transactions)<Block_size:
-        pass
     
     while list(miners.keys())[int(blockchain.last_block.hash,16) % (len(miners))] != CONNECTED_NODE_ADDRESS:
         #return "Not Me",400
         pass
     
     
+
+    while len(blockchain.unconfirmed_transactions)<Block_size:
+        pass
+    
+    
+    """
     # Making sure we have the longest chain before announcing to the network
     #chain_length = len(blockchain.chain)
     # perform consensus
-    consensus()
+    #########disabled consensus as not required
+    #consensus()
     #Thread(target = mine).start()
     result = blockchain.mine()
     #if chain_length == len(blockchain.chain):
@@ -394,6 +410,7 @@ def consensus():
     
     if longest_chain is not None:
         blockchain.chain = longest_chain
+        savechain(blockchain.chain)
         return True
     
     return False
@@ -433,7 +450,9 @@ def register_new_peers():
     #peers.update({CONNECTED_NODE_ADDRESS:node_type})
     #if node_type==1:
     #    miners.update({CONNECTED_NODE_ADDRESS:node_type})
-    consensus()
+    
+    #########disabled consensus as not required
+    #consensus()
     announce_new_peer(response)
     peers.update(response)
     if list(response.values())[0]==1:
@@ -489,7 +508,8 @@ def register_with_existing_node(node_address):
         #consensus()
         global peers
         global miners
-        blockchain.chain=create_chain_from_dump(response.json()["chain"]).chain
+        blockchain.chain=create_chain_from_dump(response.json()["chain"]).chain  
+        savechain(blockchain.chain)    
         peers=response.json()["peers"].copy()
         miners=response.json()["miners"].copy()
         return "connected"
@@ -582,6 +602,57 @@ def lost_peer():
 # Uncomment this line if you want to specify the port number in the code
 # take port as command line arguement
 # to be edited later
+##################################################################################################
+host='0.0.0.0'
+port='8000'
+node_type=int(sys.argv[1])
+Block_size=1
+
+# address of this node
+def get_ip():
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        # doesn't even have to be reachable
+        s.connect(('192.168.43.100', 80))
+        IP = s.getsockname()[0]
+    except:
+        IP = '127.0.0.1'
+    finally:
+        s.close()
+    return IP
+CONNECTED_NODE_ADDRESS="http://"+get_ip()+":"+port+"/"
+my_id=int(sha256(CONNECTED_NODE_ADDRESS.encode()).hexdigest(),16)% 4294967296
+# the address to other participating members of the network
+#peers = set()
+peers={CONNECTED_NODE_ADDRESS:node_type}
+miners={}
+if node_type==1:
+    miners={CONNECTED_NODE_ADDRESS:1}
+
+# the node's copy of blockchain
+blockchain = Blockchain()
+
+import pickle
+def loadall(filename):
+    with open(filename, "rb") as f:
+        while True:
+            try:
+                yield pickle.load(f)
+            except EOFError:
+                break
+
+try:
+    blockchain.chain=[x for x in loadall('Blockchain.pickle')]
+except:
+    blockchain.create_genesis_block()
+"""
+# genesis block of blockchain is created
+if not os.path.exists('Blockchain.pickle'):
+    blockchain.create_genesis_block()
+"""
+
+
+###############################################################################################################
 
 
 def run_app():
@@ -593,6 +664,7 @@ t1.start()
 
  
 time.sleep(1)
+"""
 # miner guy running in parallel for a miner node
 def mining():
     while 1:
@@ -601,15 +673,30 @@ if node_type:
     t2=Thread(target = mining)
     t2.daemon=True
     t2.start()
+"""
 
-from datetime import datetime    
+from datetime import datetime 
+"""   
 def view():
     text=""
     c=get_chain().get('chain')
     for b in c:
         for tx in b.get('transactions'):
             text+=tx.get('peer')+" : "+tx.get('data')+"\n"+str(datetime.utcfromtimestamp(tx.get('timestamp')).strftime('%Y-%m-%d %H:%M:%S'))+"\n\n"
-    print(text)             
+    print(text)                      
+"""
+import base64
+def view(b):
+    for tx in b.transactions:
+        f=open(tx['name'],'wb')
+        f.write(base64.b64decode(tx['img'].encode('ascii')))
+
+def get_image(name):
+    with open(name, 'rb') as f:
+        contents = f.read()
+    return base64.b64encode(contents).decode('ascii')
+
+"""
 def option_menu():
     while 1:
         print("___________________________________________________________________________________")
@@ -624,12 +711,13 @@ def option_menu():
         if res=='2':
             view()
         if res=='3':
-            print(new_transaction({'peer':CONNECTED_NODE_ADDRESS,'data':input("Enter data: ")}))
+            #print(new_transaction({'peer':CONNECTED_NODE_ADDRESS,'data':input("Enter data: ")}))
+            name=input("Enter name: ")
+            print(new_transaction({'peer':CONNECTED_NODE_ADDRESS,'name':name,'img':get_image(name)}))
         if res=='4':
             sys.exit()
         print("___________________________________________________________________________________")
         
-option_menu()
-
-
+option_menu()          
+"""
 
